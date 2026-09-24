@@ -13,7 +13,8 @@
     .question-title { font-size: 1.3rem; line-height: 1.5; color: #1d1d1f; margin-bottom: 25px; text-align: justify; white-space: pre-line; }
     .options-grid { display: grid; grid-template-columns: 1fr; gap: 12px; width: 100%; }
     .option-btn { background: #f5f5f7; border: 2px solid transparent; padding: 14px 20px; border-radius: 12px; font-size: 1rem; color: #1d1d1f; text-align: left; cursor: pointer; transition: all 0.2s ease; }
-    .option-btn:hover { background: #e8e8ed; }
+    .option-btn:hover:not(:disabled) { background: #e8e8ed; }
+    .option-btn:disabled { cursor: not-allowed; opacity: 0.8; }
     .explanation-box { margin-top: 20px; padding: 15px 20px; border-radius: 12px; text-align: left; font-size: 0.95rem; line-height: 1.5; display: none; }
     .explanation-box.correct { background: #eafbe7; color: #1e7e34; border: 1px solid #c3e6cb; }
     .explanation-box.wrong { background: #fdf2f2; color: #dc3545; border: 1px solid #f5c6cb; }
@@ -39,30 +40,43 @@
     let currentIndex = 0;
     let score = 0;
 
-    window.onload = function() {
-      fetch('./questions.json')
-        .then(response => {
-          if (!response.ok) throw new Error('無法讀取 questions.json');
-          return response.json();
-        })
-        .then(data => {
-          rawQuestions = data;
-          initQuiz();
-        })
-        .catch(error => {
-          console.warn('讀取 questions.json 失敗，嘗試從本地快取讀取:', error);
-          const storedData = localStorage.getItem('quiz_questions');
-          if (storedData) {
+    window.addEventListener('DOMContentLoaded', loadData);
+
+    async function loadData() {
+      // 嘗試載入題庫，若失敗則讀取 localStorage
+      const paths = ['questions.json', './questions.json'];
+      let loaded = false;
+
+      for (const path of paths) {
+        try {
+          const response = await fetch(path);
+          if (response.ok) {
+            rawQuestions = await response.json();
+            loaded = true;
+            break;
+          }
+        } catch (e) {
+          console.warn(`嘗試載入 ${path} 失敗:`, e);
+        }
+      }
+
+      if (loaded && Array.isArray(rawQuestions) && rawQuestions.length > 0) {
+        initQuiz();
+      } else {
+        const storedData = localStorage.getItem('quiz_questions');
+        if (storedData) {
+          try {
             rawQuestions = JSON.parse(storedData);
             initQuiz();
-          } else {
-            document.getElementById('question-text').innerText = '無法載入題庫，請檢查 questions.json 格式是否正確。';
-          }
-        });
-    };
+            return;
+          } catch(e) {}
+        }
+        document.getElementById('question-text').innerText = '無法載入題庫，請確認 questions.json 格式與路徑是否正確。';
+      }
+    }
 
     function initQuiz() {
-      if (rawQuestions.length === 0) {
+      if (!rawQuestions || rawQuestions.length === 0) {
         document.getElementById('question-text').innerText = '題庫內容為空。';
         return;
       }
@@ -76,23 +90,36 @@
       const q = quizQuestions[currentIndex];
       document.getElementById('chapter-tag').innerText = q.chapter || '歷史題庫';
       document.getElementById('progress-tag').innerText = `第 ${currentIndex + 1} / ${quizQuestions.length} 題`;
-      document.getElementById('question-text').innerText = q.title;
+      document.getElementById('question-text').innerText = q.title || q.question || '無題目敘述';
 
       const optionsBox = document.getElementById('options-box');
       optionsBox.innerHTML = '';
       
-      ['A', 'B', 'C', 'D'].forEach(key => {
-        if(q.options && q.options[key]) {
-          const btn = document.createElement('button');
-          btn.className = 'option-btn';
-          
-          let rawText = String(q.options[key]).trim();
-          let cleanText = rawText.replace(/^[A-Da-d][.\s、:]+/, '').trim();
+      // 相容性處理：不管是陣列 ["A","B"] 還是物件 {"A":"...","B":"..."}
+      let optionsList = [];
+      if (Array.isArray(q.options)) {
+        const keys = ['A', 'B', 'C', 'D'];
+        optionsList = q.options.map((opt, idx) => ({
+          key: keys[idx] || String(idx + 1),
+          text: opt
+        }));
+      } else if (typeof q.options === 'object' && q.options !== null) {
+        optionsList = Object.keys(q.options).map(key => ({
+          key: key,
+          text: q.options[key]
+        }));
+      }
 
-          btn.innerText = `${key}. ${cleanText}`;
-          btn.onclick = () => checkAnswer(key);
-          optionsBox.appendChild(btn);
-        }
+      optionsList.forEach(item => {
+        const btn = document.createElement('button');
+        btn.className = 'option-btn';
+        
+        let rawText = String(item.text).trim();
+        let cleanText = rawText.replace(/^[A-Da-d][.\s、:]+/, '').trim();
+
+        btn.innerText = `${item.key}. ${cleanText}`;
+        btn.onclick = () => checkAnswer(item.key, item.text);
+        optionsBox.appendChild(btn);
       });
 
       const explainBox = document.getElementById('explain-box');
@@ -101,20 +128,24 @@
       document.getElementById('next-btn').style.display = 'none';
     }
 
-    function checkAnswer(selected) {
+    function checkAnswer(selectedKey, selectedText) {
       const q = quizQuestions[currentIndex];
       const explainBox = document.getElementById('explain-box');
       const buttons = document.querySelectorAll('.option-btn');
 
       buttons.forEach(btn => btn.disabled = true);
 
-      // 自動移除[cite: 1] 或  這類標記
-      let cleanExplanation = String(q.explanation || '')
-        .replace(/\/gi, '')
+      // 淨化解析內容
+      let cleanExplanation = String(q.explanation || q.explain || '暫無解析')
         .replace(/\[\/?cite[^\]]*\]/gi, '')
         .trim();
 
-      if (selected === q.answer) {
+      // 比對答案（支援比對 key 例如 "A" 或完整文字）
+      const isCorrect = (selectedKey === q.answer) || 
+                        (selectedText === q.answer) || 
+                        (String(q.answer).toUpperCase() === selectedKey);
+
+      if (isCorrect) {
         score++;
         explainBox.innerHTML = `<strong>✅ 回答正確！</strong><br>${cleanExplanation}`;
         explainBox.classList.add('correct');
