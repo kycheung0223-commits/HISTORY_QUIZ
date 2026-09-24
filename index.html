@@ -88,11 +88,11 @@
           const btn = document.createElement('button');
           btn.className = 'option-btn';
           
-          // 🔥 清理邏輯：強力把文字開頭的 "A.", "A ", "A、", "A" 抹除乾淨
+          // 🔥 強力清理：移除文字開頭重複的 "A.", "A ", "A、" 等前綴
           let rawText = String(q.options[key]).trim();
           let cleanText = rawText.replace(/^[A-Da-d][.\s、:]+/, '').trim();
 
-          // 重新組成乾淨的 "A. 內容"
+          // 重新組成統一格式的 "A. 選項內容"
           btn.innerText = `${key}. ${cleanText}`;
           btn.onclick = () => checkAnswer(key);
           optionsBox.appendChild(btn);
@@ -112,12 +112,15 @@
 
       buttons.forEach(btn => btn.disabled = true);
 
+      // 🔥 強力清理：清除解析欄位裡的[cite: 1] 或 標籤
+      let cleanExplanation = String(q.explanation || '').replace(/\/gi, '').trim();
+
       if (selected === q.answer) {
         score++;
-        explainBox.innerHTML = `<strong>✅ 回答正確！</strong><br>${q.explanation}`;
+        explainBox.innerHTML = `<strong>✅ 回答正確！</strong><br>${cleanExplanation}`;
         explainBox.classList.add('correct');
       } else {
-        explainBox.innerHTML = `<strong>❌ 回答錯誤（正確答案：${q.answer}）</strong><br>${q.explanation}`;
+        explainBox.innerHTML = `<strong>❌ 回答錯誤（正確答案：${q.answer}）</strong><br>${cleanExplanation}`;
         explainBox.classList.add('wrong');
       }
 
