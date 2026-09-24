@@ -40,10 +40,10 @@
     let score = 0;
 
     window.onload = function() {
-      // 1. 先嘗試讀取與網頁同目錄下的 questions.json
+      // 讀取同目錄下的 questions.json
       fetch('./questions.json')
         .then(response => {
-          if (!response.ok) throw new Error('網絡錯誤或找不到 questions.json 檔案');
+          if (!response.ok) throw new Error('無法讀取 questions.json');
           return response.json();
         })
         .then(data => {
@@ -51,24 +51,23 @@
           initQuiz();
         })
         .catch(error => {
-          console.warn('讀取 questions.json 失敗，嘗試從本地快取 (localStorage) 讀取:', error);
-          // 2. 備用方案：若 JSON 讀取失敗，讀取瀏覽器快取
+          console.warn('讀取 questions.json 失敗，嘗試從本地快取讀取:', error);
           const storedData = localStorage.getItem('quiz_questions');
           if (storedData) {
             rawQuestions = JSON.parse(storedData);
             initQuiz();
           } else {
-            document.getElementById('question-text').innerText = '無法載入題庫。請確保 questions.json 檔案已成功上載至 GitHub。';
+            document.getElementById('question-text').innerText = '無法載入題庫，請確認 questions.json 是否已上載。';
           }
         });
     };
 
     function initQuiz() {
       if (rawQuestions.length === 0) {
-        document.getElementById('question-text').innerText = '題库內容為空。';
+        document.getElementById('question-text').innerText = '題庫內容為空。';
         return;
       }
-      // 隨機抽取 20 題 (不滿 20 題則全部載入)
+      // 隨機抽取最多 20 題
       quizQuestions = [...rawQuestions].sort(() => 0.5 - Math.random()).slice(0, 20);
       currentIndex = 0;
       score = 0;
@@ -77,7 +76,7 @@
 
     function renderQuestion() {
       const q = quizQuestions[currentIndex];
-      document.getElementById('chapter-tag').innerText = q.chapter;
+      document.getElementById('chapter-tag').innerText = q.chapter || '歷史題庫';
       document.getElementById('progress-tag').innerText = `第 ${currentIndex + 1} / ${quizQuestions.length} 題`;
       document.getElementById('question-text').innerText = q.title;
 
@@ -88,7 +87,13 @@
         if(q.options && q.options[key]) {
           const btn = document.createElement('button');
           btn.className = 'option-btn';
-          btn.innerText = `${key}. ${q.options[key]}`;
+          
+          // 🔥 清理邏輯：強力把文字開頭的 "A.", "A ", "A、", "A" 抹除乾淨
+          let rawText = String(q.options[key]).trim();
+          let cleanText = rawText.replace(/^[A-Da-d][.\s、:]+/, '').trim();
+
+          // 重新組成乾淨的 "A. 內容"
+          btn.innerText = `${key}. ${cleanText}`;
           btn.onclick = () => checkAnswer(key);
           optionsBox.appendChild(btn);
         }
