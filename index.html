@@ -43,8 +43,9 @@
     window.addEventListener('DOMContentLoaded', loadData);
 
     async function loadData() {
-      // 嘗試載入題庫，若失敗則讀取 localStorage
-      const paths = ['questions.json', './questions.json'];
+      // 加上時間戳記 prevent cache (防止瀏覽器快取舊的無效 JSON)
+      const cacheBuster = `?t=${new Date().getTime()}`;
+      const paths = [`questions.json${cacheBuster}`, `./questions.json${cacheBuster}`];
       let loaded = false;
 
       for (const path of paths) {
@@ -56,22 +57,25 @@
             break;
           }
         } catch (e) {
-          console.warn(`嘗試載入 ${path} 失敗:`, e);
+          console.warn(`讀取 ${path} 失敗:`, e);
         }
       }
 
       if (loaded && Array.isArray(rawQuestions) && rawQuestions.length > 0) {
         initQuiz();
       } else {
+        // 嘗試備用本地快取
         const storedData = localStorage.getItem('quiz_questions');
         if (storedData) {
           try {
             rawQuestions = JSON.parse(storedData);
-            initQuiz();
-            return;
+            if (rawQuestions.length > 0) {
+              initQuiz();
+              return;
+            }
           } catch(e) {}
         }
-        document.getElementById('question-text').innerText = '無法載入題庫，請確認 questions.json 格式與路徑是否正確。';
+        document.getElementById('question-text').innerText = '❌ 無法載入題庫：請確認 questions.json 檔案內容是否為空，或 JSON 格式是否正確。';
       }
     }
 
@@ -80,6 +84,7 @@
         document.getElementById('question-text').innerText = '題庫內容為空。';
         return;
       }
+      // 隨機抽 20 題（若不足 20 題則全部顯示）
       quizQuestions = [...rawQuestions].sort(() => 0.5 - Math.random()).slice(0, 20);
       currentIndex = 0;
       score = 0;
@@ -88,34 +93,42 @@
 
     function renderQuestion() {
       const q = quizQuestions[currentIndex];
-      document.getElementById('chapter-tag').innerText = q.chapter || '歷史題庫';
+      
+      // 1. 章節名稱相容處理
+      document.getElementById('chapter-tag').innerText = q.chapter || q.category || '歷史題庫';
       document.getElementById('progress-tag').innerText = `第 ${currentIndex + 1} / ${quizQuestions.length} 題`;
-      document.getElementById('question-text').innerText = q.title || q.question || '無題目敘述';
+      
+      // 2. 題目內容相容處理
+      const qTitle = q.title || q.question || q.q || '無題目內容';
+      document.getElementById('question-text').innerText = qTitle;
 
       const optionsBox = document.getElementById('options-box');
       optionsBox.innerHTML = '';
       
-      // 相容性處理：不管是陣列 ["A","B"] 還是物件 {"A":"...","B":"..."}
+      // 3. 選項相容處理 (陣列/物件均可)
+      const rawOptions = q.options || q.choices || q.answers;
       let optionsList = [];
-      if (Array.isArray(q.options)) {
-        const keys = ['A', 'B', 'C', 'D'];
-        optionsList = q.options.map((opt, idx) => ({
+
+      if (Array.isArray(rawOptions)) {
+        const keys = ['A', 'B', 'C', 'D', 'E'];
+        optionsList = rawOptions.map((opt, idx) => ({
           key: keys[idx] || String(idx + 1),
           text: opt
         }));
-      } else if (typeof q.options === 'object' && q.options !== null) {
-        optionsList = Object.keys(q.options).map(key => ({
+      } else if (typeof rawOptions === 'object' && rawOptions !== null) {
+        optionsList = Object.keys(rawOptions).map(key => ({
           key: key,
-          text: q.options[key]
+          text: rawOptions[key]
         }));
       }
 
+      // 渲染選項按鈕
       optionsList.forEach(item => {
         const btn = document.createElement('button');
         btn.className = 'option-btn';
         
         let rawText = String(item.text).trim();
-        let cleanText = rawText.replace(/^[A-Da-d][.\s、:]+/, '').trim();
+        let cleanText = rawText.replace(/^[A-Da-d1-5][.\s、:]+/, '').trim();
 
         btn.innerText = `${item.key}. ${cleanText}`;
         btn.onclick = () => checkAnswer(item.key, item.text);
@@ -135,22 +148,24 @@
 
       buttons.forEach(btn => btn.disabled = true);
 
-      // 淨化解析內容
-      let cleanExplanation = String(q.explanation || q.explain || '暫無解析')
+      // 解析文字清理
+      let rawExplain = q.explanation || q.explain || q.detail || '暫無解析';
+      let cleanExplanation = String(rawExplain)
         .replace(/\[\/?cite[^\]]*\]/gi, '')
         .trim();
 
-      // 比對答案（支援比對 key 例如 "A" 或完整文字）
-      const isCorrect = (selectedKey === q.answer) || 
-                        (selectedText === q.answer) || 
-                        (String(q.answer).toUpperCase() === selectedKey);
+      // 正確答案相容處理
+      const targetAnswer = String(q.answer || q.correct || '').trim();
+      const isCorrect = (selectedKey.toUpperCase() === targetAnswer.toUpperCase()) || 
+                        (selectedText.trim() === targetAnswer) ||
+                        (selectedKey === targetAnswer);
 
       if (isCorrect) {
         score++;
         explainBox.innerHTML = `<strong>✅ 回答正確！</strong><br>${cleanExplanation}`;
         explainBox.classList.add('correct');
       } else {
-        explainBox.innerHTML = `<strong>❌ 回答錯誤（正確答案：${q.answer}）</strong><br>${cleanExplanation}`;
+        explainBox.innerHTML = `<strong>❌ 回答錯誤（正確答案：${targetAnswer}）</strong><br>${cleanExplanation}`;
         explainBox.classList.add('wrong');
       }
 
